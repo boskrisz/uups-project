@@ -1,0 +1,62 @@
+name: MIGRATOR - Build and Test application
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'post-migrator/**'
+  pull_request:
+    branches: 
+      - master
+    paths:
+      - 'post-migrator/**'
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./post-migrator
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python version
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Create and start virtual environment
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        env:
+          TEST_STORAGE_ACCOUNT_URL: ${{ vars.TEST_STORAGE_ACCOUNT_URL }}
+          TEST_STORAGE_CONTAINER_NAME: ${{ vars.TEST_STORAGE_CONTAINER_NAME }}
+          TEST_STORAGE_CONTAINER_SAS: ${{ secrets.TEST_STORAGE_CONTAINER_SAS }}
+          TEST_COSMOSDB_ACCOUNT_URL: ${{ vars.TEST_COSMOSDB_ACCOUNT_URL }}
+          TEST_COSMOSDB_ACCOUNT_KEY: ${{ secrets.TEST_COSMOSDB_ACCOUNT_KEY }}
+          TEST_COSMOSDB_DATABASE_NAME: ${{ vars.TEST_COSMOSDB_DATABASE_NAME }}
+          TEST_COSMOSDB_CONTAINER_NAME: ${{ vars.TEST_COSMOSDB_CONTAINER_NAME }}
+        run: python -m pytest ./tests
+
+      - name: Zip artifact for deployment
+        run: zip release.zip ./* -r
+
+      - name: Upload artifact for deployment job
+        uses: actions/upload-artifact@v4
+        with:
+          name: uups-post-migrator
+          path: |
+            ${{ github.workspace }}/post-migrator/release.zip
+            !${{ github.workspace }}/post-migrator/venv/

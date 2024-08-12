@@ -1,0 +1,104 @@
+name: PUBLISHER - Build and Deploy to Function App
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'post-publisher/**'
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./post-publisher
+    permissions:
+      id-token: write #This is required for requesting the JWT from Azure via OIDC
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python version
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Create and start virtual environment
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+
+      - name: Install dependencies
+        # Workaround due to Python v2 model Function App integration issues
+        # https://github.com/Azure/azure-functions-python-worker/issues/1262
+        run: pip install --target=".python_packages/lib/site-packages" -r requirements.txt
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run tests
+        env:
+          TEST_STORAGE_ACCOUNT_URL: ${{ vars.TEST_STORAGE_ACCOUNT_URL }}
+          TEST_STORAGE_CONTAINER_NAME: ${{ vars.TEST_STORAGE_CONTAINER_NAME }}
+          TEST_STORAGE_CONTAINER_SAS: ${{ secrets.TEST_STORAGE_CONTAINER_SAS }}
+          TEST_COSMOSDB_ACCOUNT_URL: ${{ vars.TEST_COSMOSDB_ACCOUNT_URL }}
+          TEST_COSMOSDB_ACCOUNT_KEY: ${{ secrets.TEST_COSMOSDB_ACCOUNT_KEY }}
+          TEST_COSMOSDB_DATABASE_NAME: ${{ vars.TEST_COSMOSDB_DATABASE_NAME }}
+          TEST_COSMOSDB_CONTAINER_NAME: ${{ vars.TEST_COSMOSDB_CONTAINER_NAME }}
+          PYTHONPATH: .python_packages/lib/site-packages
+        run: python -m pytest ./tests
+
+      - name: Zip artifact for deployment
+        run: zip release.zip .python_packages ./* -r
+
+      - name: Upload artifact for deployment job
+        uses: actions/upload-artifact@v4
+        with:
+          name: uups-post-publisher
+          path: |
+            ${{ github.workspace }}/post-publisher/release.zip
+            !${{ github.workspace }}/post-publisher/venv/
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      id-token: write #This is required for requesting the JWT from Azure via OIDC
+      contents: read
+
+    steps:
+      - name: Download artifact from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: uups-post-publisher
+
+      - name: Unzip artifact for deployment
+        run: unzip release.zip
+        
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: 'Deploy to Azure Functions'
+        uses: Azure/functions-action@v1
+        id: deploy-to-function
+        with:
+          app-name: ${{ vars.AZURE_FUNCTION_APP_NAME }}
+          package: '.'
+          # Set to false due to Python v2 model Function App integration issues
+          # https://github.com/Azure/azure-functions-python-worker/issues/1262
+          scm-do-build-during-deployment: false
+          enable-oryx-build: false

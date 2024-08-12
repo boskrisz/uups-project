@@ -1,0 +1,5 @@
+python-dotenv==1.0.1
+azure-storage-blob==12.22.0
+azure-cosmos==4.7.0
+pytest==8.3.2
+pillow==10.4.0

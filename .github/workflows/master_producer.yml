@@ -1,0 +1,54 @@
+name: PRODUCER - Build and Test application
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'post-producer/**'
+  pull_request:
+    branches: 
+      - master
+    paths:
+      - 'post-producer/**'
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./post-producer
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python version
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Create and start virtual environment
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest ./tests
+
+      - name: Zip artifact for deployment
+        run: zip release.zip ./* -r
+
+      - name: Upload artifact for deployment job
+        uses: actions/upload-artifact@v4
+        with:
+          name: uups-post-producer
+          path: |
+            ${{ github.workspace }}/post-producer/release.zip
+            !${{ github.workspace }}/post-producer/venv/
